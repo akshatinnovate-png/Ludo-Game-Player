@@ -1,44 +1,35 @@
-# Ludo Player
+# Ludo Table
 
-A phone web app that watches a real Ludo board through the camera and tells you the best move for the computer's two colours (team play: 2 colours for the computer, 2 for the humans). You move the tokens for it.
+Team Ludo for one laptop, in the browser: a polished board, a 3D dice with a rolling animation, and a computer opponent that plays its colours on its own.
 
-Everything runs in the browser: no server, no API key, no downloads, no rate limits.
+**Play:** https://akshatinnovate-png.github.io/Ludo-Game-Player/
 
-## How a game goes
+## Playing
 
-1. **Start a game.** Pick which colour sits in each corner, the computer's two colours, and who throws first.
-2. **Learn the board (once).** With every token in its yard, take a photo in the app. Tap the outer corner of each yard, then one token of each colour.
-3. **Every turn:** enter the throws (1–6 buttons), then:
-   - **Human turn:** move your tokens, tap 📷 and take a photo. The app checks the photo against every legal move for those throws, starting from the last saved board, and shows its best guess with arrows. Confirm it or pick another.
-   - **Computer turn:** the best move appears immediately on the virtual board. Tap 📷 to see it drawn on a photo of the real board. Move the tokens, then tap **Done**.
-4. **Fixing mistakes:** ⋯ menu → *Edit board by hand* (tap a token, then tap where it really is), *Undo*, or *Re-learn the board* if the lighting or camera position changed a lot.
+- **New game:** click each colour to make it Human or Computer. Opposite colours are partners (Red + Yellow, Green + Blue).
+- **Roll:** click the dice or press **Space**.
+- **Move:** pawns that can move glow. Hover a pawn to preview where it lands, then click the pawn or its target square. If you threw more than one number (for example 6, 6, 4), pick which number to play first by clicking it or pressing 1, 2 or 3.
+- Computer colours roll and move by themselves. The game saves itself, so a refresh carries on where you left off.
 
-The game is saved on the phone after every step. Close the tab and use *Continue saved game* to pick up again.
+## Rules
 
-## Rules used
-
-- A 6 brings a token out, and a 6 earns another throw. Enter all throws for the turn (6, 6, 4…) before moving.
-- Three 6s in a row are void. The next throw starts the turn afresh.
+- A 6 brings a pawn out and earns another throw. You throw all your dice first, then move.
+- Three 6s in a row don't count. The next throw starts fresh.
 - Start squares and star squares are safe.
-- Capturing, or getting a token home, earns an extra throw.
+- Capturing, or getting a pawn home, earns an extra throw.
 - You need the exact number to finish.
-- Teammates share throws: a throw by either colour can move either colour's tokens. Teammates never capture each other.
+- Partners share every throw: a throw for either colour can move either colour's pawns. Partners never capture each other.
+- A team wins when all 8 of its pawns are home.
 
-## The engine
+## The computer
 
-`src/engine.js` is an expectiminimax search, the dice equivalent of what Stockfish does for chess. It tries every way to play the throws, then looks ahead up to three turns, averaging over every die face. It scores positions using progress, safety, the chance of being captured and capture threats. A turn takes a fraction of a second on a phone.
-
-## Photo reading
-
-`src/vision.js` uses on-device colour detection. The four corner taps fix the board's perspective. Each track square is then compared with how it looked empty and with the tapped token colours. That reading is matched against the boards that could legally follow the last saved one, which is why reading works even when the photo is imperfect. For best results, shoot from roughly above, in even light, and keep the phone in a similar spot each time. If the grid drawn on the photo doesn't line up, tap *Grid is off: re-mark corners*.
-
-## Hosting on GitHub Pages
-
-Repo → Settings → Pages → *Deploy from a branch* → pick the branch and `/ (root)`. Open the URL on your phone. The camera needs HTTPS, which Pages provides.
+`src/engine.js` is an expectiminimax search, the dice equivalent of what chess engines do. It tries every way to play the throws, then looks ahead up to three turns, averaging over every die face. It scores positions using progress, safety, the chance of being captured and capture threats. It runs instantly in the browser, with no server and no limits.
 
 ## Development
 
 ```sh
-npm test          # rules, engine and synthetic-photo tests (Node 20+)
-npm start         # serves on http://localhost:8000
+npm test     # rules and engine tests
+npm start    # http://localhost:8000
 ```
+
+Every push to `main` runs the tests and deploys to GitHub Pages (`.github/workflows/pages.yml`).
