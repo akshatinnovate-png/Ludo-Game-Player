@@ -1,0 +1,12 @@
+{
+  "name": "ludo-game-player",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Phone web app that reads a real Ludo board from a photo and suggests the best move for a team of two colours.",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "start": "python3 -m http.server 8000"
+  },
+  "license": "MIT"
+}
