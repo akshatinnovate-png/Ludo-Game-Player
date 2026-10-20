@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1d1b17">
+  <title>Ludo Player</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Crect width=%22100%22 height=%22100%22 rx=%2220%22 fill=%22%23fff%22/%3E%3Crect x=%228%22 y=%228%22 width=%2238%22 height=%2238%22 rx=%226%22 fill=%22%23e53935%22/%3E%3Crect x=%2254%22 y=%228%22 width=%2238%22 height=%2238%22 rx=%226%22 fill=%22%232e9e44%22/%3E%3Crect x=%2254%22 y=%2254%22 width=%2238%22 height=%2238%22 rx=%226%22 fill=%22%23f9c80e%22/%3E%3Crect x=%228%22 y=%2254%22 width=%2238%22 height=%2238%22 rx=%226%22 fill=%22%231e7be5%22/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main id="app">
+
+    <!-- Home -->
+    <section id="screen-home" class="screen">
+      <header class="hero">
+        <h1>Ludo Player</h1>
+        <p>Point your phone at the board. It reads the position and tells you the best move for its two colours.</p>
+      </header>
+      <button id="btn-new" class="primary big">Start a game</button>
+      <button id="btn-continue" class="big" hidden>Continue saved game</button>
+      <ol class="howto">
+        <li>Pick the board's colours and which two colours are the computer's team.</li>
+        <li>Take one photo with every token in its yard so the app learns your board.</li>
+        <li>Each turn: enter the throws, take a photo, and confirm what happened.</li>
+        <li>On the computer's turns, the best move is drawn on the photo. You move the tokens for it.</li>
+      </ol>
+    </section>
+
+    <!-- Setup -->
+    <section id="screen-setup" class="screen" hidden>
+      <h2>New game</h2>
+      <div class="card">
+        <h3>Board colours</h3>
+        <p class="hint">Which colour is in each corner of your board? Order doesn't depend on how you hold the phone; pick the colours going clockwise.</p>
+        <div class="corner-grid">
+          <label>Top-left <select data-corner="0"></select></label>
+          <label>Top-right <select data-corner="1"></select></label>
+          <label>Bottom-left <select data-corner="3"></select></label>
+          <label>Bottom-right <select data-corner="2"></select></label>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Computer's two colours</h3>
+        <p class="hint">Its team shares throws: a throw for either colour can move a token of either colour.</p>
+        <div id="ai-chips" class="chips"></div>
+      </div>
+      <div class="card">
+        <h3>Who throws first?</h3>
+        <div id="first-chips" class="chips"></div>
+      </div>
+      <p id="setup-error" class="error" hidden></p>
+      <div class="row">
+        <button id="btn-setup-back">Back</button>
+        <button id="btn-setup-next" class="primary">Next: learn the board</button>
+      </div>
+    </section>
+
+    <!-- Calibrate -->
+    <section id="screen-calibrate" class="screen" hidden>
+      <h2>Learn the board</h2>
+      <p id="calib-prompt" class="prompt">Put every token in its yard, then take a photo from straight above with the whole board in view.</p>
+      <canvas id="calib-canvas" class="photo" hidden></canvas>
+      <div class="row">
+        <button id="btn-calib-undo" hidden>Undo tap</button>
+        <button id="btn-calib-photo" class="primary">📷 Take photo</button>
+        <button id="btn-calib-done" class="primary" hidden>Looks right</button>
+      </div>
+    </section>
+
+    <!-- Game -->
+    <section id="screen-game" class="screen" hidden>
+      <div class="turnbar">
+        <button id="btn-prev-seat" class="icon" aria-label="Previous colour">‹</button>
+        <div id="turn-label" class="turn-label"></div>
+        <button id="btn-next-seat" class="icon" aria-label="Next colour">›</button>
+        <button id="btn-menu" class="icon" aria-label="Menu">⋯</button>
+      </div>
+
+      <div id="menu" class="menu" hidden>
+        <button id="btn-edit">✏️ Edit board by hand</button>
+        <button id="btn-undo">↩︎ Undo last step</button>
+        <button id="btn-recalibrate">🎯 Re-learn the board</button>
+        <button id="btn-history">📜 History</button>
+        <button id="btn-quit">🏠 New game</button>
+      </div>
+
+      <canvas id="board" class="board" width="600" height="600"></canvas>
+      <p id="edit-banner" class="banner" hidden>Edit mode: tap a token, then tap where it really is (yard, a square, or the centre). <button id="btn-edit-done" class="small primary">Done</button></p>
+
+      <div id="status" class="status"></div>
+
+      <div id="dice-panel" class="card">
+        <div class="dice-head">
+          <span>Throws this turn</span>
+          <span id="dice-seq" class="dice-seq"></span>
+          <button id="btn-dice-clear" class="small">Clear</button>
+        </div>
+        <div class="dice-pad">
+          <button data-die="1">1</button><button data-die="2">2</button><button data-die="3">3</button>
+          <button data-die="4">4</button><button data-die="5">5</button><button data-die="6">6</button>
+        </div>
+      </div>
+
+      <div id="action-panel" class="card" hidden>
+        <div id="action-text"></div>
+        <div id="action-buttons" class="stack"></div>
+      </div>
+
+      <canvas id="photo" class="photo" hidden></canvas>
+      <div id="history" class="card" hidden></div>
+    </section>
+  </main>
+
+  <!-- Camera -->
+  <div id="camera" class="camera" hidden>
+    <video id="camera-video" playsinline muted autoplay></video>
+    <div class="camera-guide"></div>
+    <p id="camera-msg" class="camera-msg">Hold the phone over the board so all of it fits.</p>
+    <div class="camera-bar">
+      <button id="btn-cam-cancel">Cancel</button>
+      <button id="btn-cam-shoot" class="shutter" aria-label="Capture"></button>
+      <label class="filebtn">Gallery<input id="cam-file" type="file" accept="image/*" capture="environment" hidden></label>
+    </div>
+  </div>
+
+  <script type="module" src="src/app.js"></script>
+</body>
+</html>
