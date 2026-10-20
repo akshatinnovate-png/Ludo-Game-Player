@@ -1,16 +1,18 @@
-// Drawing: the virtual board, and annotations on top of a board photo.
+// Board graphics: a static board drawn once per resize, with pawns, highlights
+// and move animations drawn on top every frame.
 
-import { HOME_COLUMN, LOOP, SAFE_SQUARES, SIZE, START_SQUARES, tokenPoint } from './board.js';
-import { projectPoint } from './vision.js';
+import { HOME_COLUMN, LOOP, SAFE_SQUARES, SIZE, START_SQUARES, YARD_SPOTS, loopIndex, tokenPoint } from './board.js';
 
 export const PALETTE = {
-  red: { fill: '#e53935', soft: '#ffcdd2', ink: '#fff' },
-  green: { fill: '#2e9e44', soft: '#c8e6c9', ink: '#fff' },
-  yellow: { fill: '#f9c80e', soft: '#fff3b0', ink: '#3a3000' },
-  blue: { fill: '#1e7be5', soft: '#bbdefb', ink: '#fff' },
+  red: { base: '#e53935', light: '#ff7a6b', dark: '#a91d1d', tint: '#ffe3de', ink: '#fff' },
+  green: { base: '#2fa84f', light: '#6bd889', dark: '#18742f', tint: '#ddf5e3', ink: '#fff' },
+  yellow: { base: '#f5bd12', light: '#ffe06b', dark: '#b88600', tint: '#fff4c9', ink: '#3b2d00' },
+  blue: { base: '#1e7be5', light: '#62acff', dark: '#0d4f9e', tint: '#dbeaff', ink: '#fff' },
 };
 
-// Spread tokens that share a square so each stays visible and tappable.
+const STEP_MS = 140;
+
+// Spread tokens that share a square so each stays visible and clickable.
 export function tokenLayout(state) {
   const groups = new Map();
   state.pos.forEach((ps, c) => ps.forEach((p, i) => {
@@ -21,16 +23,34 @@ export function tokenLayout(state) {
   }));
   const out = [];
   for (const { pt, tokens } of groups.values()) {
+    const n = tokens.length;
     tokens.forEach((t, k) => {
-      const n = tokens.length;
-      const off = n === 1 ? [0, 0] : [Math.sin((k / n) * 2 * Math.PI) * 0.2, Math.cos((k / n) * 2 * Math.PI) * 0.2];
-      out.push({ ...t, point: [pt[0] + off[0], pt[1] + off[1]], stacked: n });
+      const off = n === 1 ? [0, 0] : [Math.sin((k / n) * 2 * Math.PI) * 0.18, Math.cos((k / n) * 2 * Math.PI) * 0.18];
+      out.push({ ...t, point: [pt[0] + off[0], pt[1] + off[1]], scale: n === 1 ? 1 : 0.8 });
     });
   }
   return out;
 }
 
-function star(ctx, x, y, r) {
+// Board points a move passes through, start to end.
+export function movePath(move) {
+  if (move.from < 0) return [tokenPoint(move.corner, -1, move.token), tokenPoint(move.corner, 0)];
+  const pts = [];
+  for (let p = move.from; p <= move.to; p++) pts.push(tokenPoint(move.corner, p, move.token));
+  return pts;
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function starPath(ctx, x, y, r) {
   ctx.beginPath();
   for (let i = 0; i < 10; i++) {
     const a = (i * Math.PI) / 5 - Math.PI / 2;
@@ -40,180 +60,318 @@ function star(ctx, x, y, r) {
   ctx.closePath();
 }
 
-function drawToken(ctx, [x, y], r, colour, { selected = false, ghost = false, label = '' } = {}) {
-  const pal = PALETTE[colour];
+function arrow(ctx, x, y, angle, size, colour) {
   ctx.save();
-  ctx.globalAlpha = ghost ? 0.45 : 1;
+  ctx.translate(x, y);
+  ctx.rotate(angle);
   ctx.beginPath();
-  ctx.arc(x, y, r, 0, Math.PI * 2);
-  ctx.fillStyle = pal.fill;
-  ctx.fill();
-  ctx.lineWidth = Math.max(1.5, r * 0.22);
-  ctx.strokeStyle = selected ? '#000' : '#fff';
-  ctx.stroke();
-  if (label) {
-    ctx.fillStyle = pal.ink;
-    ctx.font = `bold ${Math.round(r * 1.1)}px system-ui, sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(label, x, y + r * 0.05);
-  }
-  ctx.restore();
-}
-
-// Path of board points a move travels through, for drawing the arrow.
-export function movePath(move) {
-  const pts = [];
-  if (move.from < 0) return [tokenPoint(move.corner, -1, move.token), tokenPoint(move.corner, 0)];
-  for (let p = move.from; p <= move.to; p++) pts.push(tokenPoint(move.corner, p, 0));
-  return pts;
-}
-
-function drawArrow(ctx, pts, colour, width, label) {
-  if (pts.length < 2) return;
-  ctx.save();
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-  for (const [w, stroke] of [[width + 4, 'rgba(0,0,0,0.75)'], [width, colour]]) {
-    ctx.beginPath();
-    pts.forEach(([x, y], i) => ctx[i ? 'lineTo' : 'moveTo'](x, y));
-    ctx.strokeStyle = stroke;
-    ctx.lineWidth = w;
-    ctx.stroke();
-  }
-  const [x2, y2] = pts[pts.length - 1];
-  const [x1, y1] = pts[pts.length - 2];
-  const a = Math.atan2(y2 - y1, x2 - x1);
-  const h = width * 3.2;
-  ctx.beginPath();
-  ctx.moveTo(x2, y2);
-  ctx.lineTo(x2 - h * Math.cos(a - 0.5), y2 - h * Math.sin(a - 0.5));
-  ctx.lineTo(x2 - h * Math.cos(a + 0.5), y2 - h * Math.sin(a + 0.5));
+  ctx.moveTo(size * 0.55, 0);
+  ctx.lineTo(-size * 0.25, -size * 0.42);
+  ctx.lineTo(-size * 0.05, 0);
+  ctx.lineTo(-size * 0.25, size * 0.42);
   ctx.closePath();
   ctx.fillStyle = colour;
-  ctx.strokeStyle = 'rgba(0,0,0,0.75)';
-  ctx.lineWidth = 2;
   ctx.fill();
-  ctx.stroke();
-  if (label) {
-    const [lx, ly] = pts[0];
-    ctx.beginPath();
-    ctx.arc(lx, ly, width * 2.2, 0, Math.PI * 2);
-    ctx.fillStyle = '#111';
-    ctx.fill();
-    ctx.fillStyle = '#fff';
-    ctx.font = `bold ${Math.round(width * 2.6)}px system-ui, sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(label, lx, ly + 1);
-  }
   ctx.restore();
 }
 
-// colours: colour name per corner. opts.moves: suggested moves to draw as arrows.
-export function drawBoard(canvas, state, colours, opts = {}) {
-  const ctx = canvas.getContext('2d');
-  const W = canvas.width, s = W / SIZE;
-  const px = ([y, x]) => [x * s, y * s];
+function drawStaticBoard(ctx, W, colours) {
+  const s = W / SIZE;
+  const P = k => PALETTE[colours[k]];
   ctx.clearRect(0, 0, W, W);
-  ctx.fillStyle = '#fbfaf7';
-  ctx.fillRect(0, 0, W, W);
+
+  // Base
+  const base = ctx.createLinearGradient(0, 0, W, W);
+  base.addColorStop(0, '#fffdf8');
+  base.addColorStop(1, '#f1ebdf');
+  roundRect(ctx, 0, 0, W, W, s * 0.5);
+  ctx.fillStyle = base;
+  ctx.fill();
 
   // Yards
-  const yardOrigin = [[0, 0], [0, 9], [9, 9], [9, 0]];
-  yardOrigin.forEach(([r, c], k) => {
-    ctx.fillStyle = PALETTE[colours[k]].fill;
-    ctx.fillRect(c * s, r * s, 6 * s, 6 * s);
-    ctx.fillStyle = '#fff';
-    ctx.fillRect((c + 0.8) * s, (r + 0.8) * s, 4.4 * s, 4.4 * s);
-  });
-
-  const cell = (r, c, fill) => {
-    ctx.fillStyle = fill;
-    ctx.fillRect(c * s, r * s, s, s);
-    ctx.strokeStyle = '#c9c4b8';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(c * s + 0.5, r * s + 0.5, s - 1, s - 1);
-  };
-  LOOP.forEach(([r, c], g) => {
-    const startOf = START_SQUARES.indexOf(g);
-    cell(r, c, startOf >= 0 ? PALETTE[colours[startOf]].fill : '#fff');
-    if (SAFE_SQUARES.has(g) && startOf < 0) {
-      star(ctx, (c + 0.5) * s, (r + 0.5) * s, s * 0.32);
-      ctx.fillStyle = '#d6d0c2';
+  [[0, 0], [0, 9], [9, 9], [9, 0]].forEach(([r, c], k) => {
+    const x = c * s, y = r * s, pal = P(k);
+    const g = ctx.createLinearGradient(x, y, x + 6 * s, y + 6 * s);
+    g.addColorStop(0, pal.light);
+    g.addColorStop(0.55, pal.base);
+    g.addColorStop(1, pal.dark);
+    roundRect(ctx, x + s * 0.12, y + s * 0.12, 6 * s - s * 0.24, 6 * s - s * 0.24, s * 0.6);
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.25)';
+    ctx.shadowBlur = s * 0.35;
+    ctx.shadowOffsetY = s * 0.06;
+    roundRect(ctx, x + s * 0.95, y + s * 0.95, 4.1 * s, 4.1 * s, s * 0.45);
+    ctx.fillStyle = '#fffdf8';
+    ctx.fill();
+    ctx.restore();
+    for (const [py, px] of YARD_SPOTS[k]) {
+      const cx = px * s, cy = py * s;
+      const ng = ctx.createRadialGradient(cx, cy - s * 0.15, s * 0.1, cx, cy, s * 0.62);
+      ng.addColorStop(0, pal.tint);
+      ng.addColorStop(1, pal.light);
+      ctx.beginPath();
+      ctx.arc(cx, cy, s * 0.6, 0, Math.PI * 2);
+      ctx.fillStyle = ng;
       ctx.fill();
+      ctx.lineWidth = s * 0.06;
+      ctx.strokeStyle = pal.base;
+      ctx.stroke();
     }
   });
-  HOME_COLUMN.forEach((col, k) => col.forEach(([y, x]) => cell(Math.floor(y), Math.floor(x), PALETTE[colours[k]].fill)));
 
-  // Centre triangles
-  const tri = [[[6, 6], [9, 6], [7.5, 7.5]], [[6, 6], [6, 9], [7.5, 7.5]], [[6, 9], [9, 9], [7.5, 7.5]], [[9, 6], [9, 9], [7.5, 7.5]]];
-  tri.forEach((t, k) => {
-    ctx.beginPath();
-    t.forEach((p, i) => ctx[i ? 'lineTo' : 'moveTo'](...px(p)));
-    ctx.closePath();
-    ctx.fillStyle = PALETTE[colours[k]].fill;
+  // Track squares
+  const square = (r, c, fill) => {
+    roundRect(ctx, c * s + s * 0.04, r * s + s * 0.04, s * 0.92, s * 0.92, s * 0.14);
+    ctx.fillStyle = fill;
     ctx.fill();
-  });
-
-  const moving = new Set((opts.moves || []).map(m => `${m.corner}:${m.token}`));
-  for (const t of tokenLayout(state)) {
-    drawToken(ctx, px(t.point), s * 0.34, colours[t.corner], {
-      selected: opts.selected && opts.selected.corner === t.corner && opts.selected.token === t.token,
-      ghost: opts.ghostMoving && moving.has(`${t.corner}:${t.token}`),
-    });
-  }
-  (opts.moves || []).forEach((m, i) =>
-    drawArrow(ctx, movePath(m).map(px), PALETTE[colours[m.corner]].fill, Math.max(3, s * 0.16), opts.moves.length > 1 ? String(i + 1) : ''));
-}
-
-// Draw the photo with the mapped grid, read tokens and suggested moves.
-export function drawPhoto(canvas, image, opts = {}) {
-  const ctx = canvas.getContext('2d');
-  canvas.width = image.width;
-  canvas.height = image.height;
-  ctx.drawImage(image, 0, 0);
-  const { H, colours, state, moves = [], cornerTaps = [], showGrid = true } = opts;
-  const unit = Math.max(canvas.width, canvas.height) / 300;
-
-  if (H && showGrid) {
-    ctx.save();
-    ctx.strokeStyle = 'rgba(255,255,255,0.55)';
-    ctx.lineWidth = Math.max(1, unit * 0.5);
-    for (let i = 0; i <= SIZE; i++) {
-      for (const seg of [[[i, 0], [i, SIZE]], [[0, i], [SIZE, i]]]) {
-        ctx.beginPath();
-        ctx.moveTo(...projectPoint(H, seg[0]));
-        ctx.lineTo(...projectPoint(H, seg[1]));
+    ctx.lineWidth = Math.max(1, s * 0.03);
+    ctx.strokeStyle = 'rgba(80,60,30,0.14)';
+    ctx.stroke();
+  };
+  LOOP.forEach(([r, c], g) => {
+    const owner = START_SQUARES.indexOf(g);
+    if (owner >= 0) {
+      const pal = P(owner);
+      const gr = ctx.createLinearGradient(c * s, r * s, (c + 1) * s, (r + 1) * s);
+      gr.addColorStop(0, pal.light);
+      gr.addColorStop(1, pal.base);
+      square(r, c, gr);
+      const [nr, nc] = LOOP[(g + 1) % LOOP.length];
+      arrow(ctx, (c + 0.5) * s, (r + 0.5) * s, Math.atan2(nr - r, nc - c), s * 0.62, 'rgba(255,255,255,0.95)');
+    } else {
+      square(r, c, '#ffffff');
+      if (SAFE_SQUARES.has(g)) {
+        starPath(ctx, (c + 0.5) * s, (r + 0.5) * s, s * 0.34);
+        ctx.fillStyle = '#f3e3b0';
+        ctx.fill();
+        ctx.lineWidth = s * 0.05;
+        ctx.strokeStyle = '#d4a93a';
         ctx.stroke();
       }
     }
-    ctx.restore();
-  }
-  if (H && state) {
-    const s0 = projectPoint(H, [0, 0]), s1 = projectPoint(H, [0, 1]);
-    const cellPx = Math.hypot(s1[0] - s0[0], s1[1] - s0[1]);
-    for (const t of tokenLayout(state)) {
-      if (t.pos < 0) continue;
-      const [x, y] = projectPoint(H, t.point);
-      ctx.beginPath();
-      ctx.arc(x, y, cellPx * 0.42, 0, Math.PI * 2);
-      ctx.lineWidth = Math.max(2, unit);
-      ctx.strokeStyle = PALETTE[colours[t.corner]].fill;
-      ctx.stroke();
-    }
-    moves.forEach((m, i) =>
-      drawArrow(ctx, movePath(m).map(p => projectPoint(H, p)), PALETTE[colours[m.corner]].fill, Math.max(4, cellPx * 0.18), moves.length > 1 ? String(i + 1) : ''));
-  }
-  cornerTaps.forEach(([x, y], i) => {
-    ctx.beginPath();
-    ctx.arc(x, y, unit * 4, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(255,0,170,0.85)';
-    ctx.fill();
-    ctx.fillStyle = '#fff';
-    ctx.font = `bold ${Math.round(unit * 5)}px system-ui, sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(String(i + 1), x, y);
   });
+  // Entry arrows on the square before each home column
+  for (let k = 0; k < 4; k++) {
+    const [r, c] = LOOP[loopIndex(k, 50)];
+    const [hy, hx] = HOME_COLUMN[k][0];
+    arrow(ctx, (c + 0.5) * s, (r + 0.5) * s, Math.atan2(hy - (r + 0.5), hx - (c + 0.5)), s * 0.5, P(k).base);
+  }
+  HOME_COLUMN.forEach((col, k) => col.forEach(([y, x], j) => {
+    const pal = P(k);
+    const gr = ctx.createLinearGradient((x - 0.5) * s, (y - 0.5) * s, (x + 0.5) * s, (y + 0.5) * s);
+    gr.addColorStop(0, j % 2 ? pal.base : pal.light);
+    gr.addColorStop(1, pal.dark);
+    square(Math.floor(y), Math.floor(x), gr);
+  }));
+
+  // Centre
+  const tri = [[[6, 6], [9, 6]], [[6, 6], [6, 9]], [[6, 9], [9, 9]], [[9, 6], [9, 9]]];
+  tri.forEach(([a, b], k) => {
+    const pal = P(k);
+    const g = ctx.createLinearGradient(((a[1] + b[1]) / 2) * s, ((a[0] + b[0]) / 2) * s, 7.5 * s, 7.5 * s);
+    g.addColorStop(0, pal.base);
+    g.addColorStop(1, pal.light);
+    ctx.beginPath();
+    ctx.moveTo(a[1] * s, a[0] * s);
+    ctx.lineTo(b[1] * s, b[0] * s);
+    ctx.lineTo(7.5 * s, 7.5 * s);
+    ctx.closePath();
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.lineWidth = s * 0.05;
+    ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+    ctx.stroke();
+  });
+  ctx.beginPath();
+  ctx.arc(7.5 * s, 7.5 * s, s * 0.55, 0, Math.PI * 2);
+  ctx.fillStyle = '#fffdf8';
+  ctx.fill();
+  starPath(ctx, 7.5 * s, 7.5 * s, s * 0.38);
+  ctx.fillStyle = '#e2b53c';
+  ctx.fill();
+}
+
+function drawPawn(ctx, x, y, r, pal, { lift = 0, alpha = 1 } = {}) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  // Shadow shrinks as the pawn hops
+  const sh = 1 - Math.min(0.5, lift / (r * 3));
+  ctx.beginPath();
+  ctx.ellipse(x, y + r * 0.62, r * 0.85 * sh, r * 0.3 * sh, 0, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.fill();
+  y -= lift;
+  // Base
+  const bg = ctx.createLinearGradient(x - r, 0, x + r, 0);
+  bg.addColorStop(0, pal.dark);
+  bg.addColorStop(0.4, pal.base);
+  bg.addColorStop(1, pal.dark);
+  ctx.beginPath();
+  ctx.ellipse(x, y + r * 0.45, r * 0.8, r * 0.32, 0, 0, Math.PI * 2);
+  ctx.fillStyle = bg;
+  ctx.fill();
+  // Body
+  ctx.beginPath();
+  ctx.moveTo(x - r * 0.72, y + r * 0.42);
+  ctx.quadraticCurveTo(x - r * 0.25, y + r * 0.1, x - r * 0.22, y - r * 0.35);
+  ctx.lineTo(x + r * 0.22, y - r * 0.35);
+  ctx.quadraticCurveTo(x + r * 0.25, y + r * 0.1, x + r * 0.72, y + r * 0.42);
+  ctx.closePath();
+  ctx.fillStyle = bg;
+  ctx.fill();
+  // Head
+  const hg = ctx.createRadialGradient(x - r * 0.15, y - r * 0.72, r * 0.05, x, y - r * 0.55, r * 0.48);
+  hg.addColorStop(0, '#ffffff');
+  hg.addColorStop(0.25, pal.light);
+  hg.addColorStop(1, pal.dark);
+  ctx.beginPath();
+  ctx.arc(x, y - r * 0.55, r * 0.42, 0, Math.PI * 2);
+  ctx.fillStyle = hg;
+  ctx.fill();
+  ctx.lineWidth = Math.max(1, r * 0.06);
+  ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+  ctx.stroke();
+  ctx.restore();
+}
+
+export function createBoardView(canvas, { onPick } = {}) {
+  const ctx = canvas.getContext('2d');
+  const staticCanvas = document.createElement('canvas');
+  let colours = ['red', 'green', 'yellow', 'blue'];
+  let state = null;
+  let moves = [];
+  let hover = null;
+  let W = 0;
+  const anims = new Map(); // "corner:token" -> { path, t0, dur }
+
+  function resize() {
+    const dpr = window.devicePixelRatio || 1;
+    const css = canvas.getBoundingClientRect().width;
+    W = Math.max(1, Math.round(css * dpr));
+    canvas.width = canvas.height = W;
+    staticCanvas.width = staticCanvas.height = W;
+    drawStaticBoard(staticCanvas.getContext('2d'), W, colours);
+  }
+  new ResizeObserver(resize).observe(canvas);
+
+  const s = () => W / SIZE;
+  const toBoard = e => {
+    const r = canvas.getBoundingClientRect();
+    return [((e.clientY - r.top) / r.height) * SIZE, ((e.clientX - r.left) / r.width) * SIZE];
+  };
+
+  // Which move the pointer is on: a movable pawn, or that move's destination square.
+  function moveAt(pt) {
+    if (!state || !moves.length) return null;
+    const layout = tokenLayout(state);
+    let best = null, bd = 0.6;
+    for (const m of moves) {
+      const t = layout.find(l => l.corner === m.corner && l.pos === m.from);
+      if (t) {
+        const d = Math.hypot(t.point[0] - pt[0], t.point[1] - pt[1]);
+        if (d < bd) { bd = d; best = m; }
+      }
+    }
+    if (best) return best;
+    const dests = moves.filter(m => {
+      const [y, x] = tokenPoint(m.corner, m.to, m.token);
+      return Math.abs(y - pt[0]) < 0.5 && Math.abs(x - pt[1]) < 0.5;
+    });
+    return dests.length === 1 ? dests[0] : null;
+  }
+
+  canvas.addEventListener('pointermove', e => {
+    hover = moveAt(toBoard(e));
+    canvas.style.cursor = hover ? 'pointer' : 'default';
+  });
+  canvas.addEventListener('pointerleave', () => { hover = null; });
+  canvas.addEventListener('click', e => {
+    const m = moveAt(toBoard(e));
+    if (m && onPick) onPick(m);
+  });
+
+  function animPoint(a, now) {
+    const t = Math.max(0, now - a.t0);
+    if (t >= a.dur) return null;
+    const n = a.path.length - 1;
+    const f = (t / a.dur) * n;
+    const i = Math.min(n - 1, Math.floor(f)), u = f - i;
+    const [y0, x0] = a.path[i], [y1, x1] = a.path[i + 1];
+    return { point: [y0 + (y1 - y0) * u, x0 + (x1 - x0) * u], lift: Math.sin(u * Math.PI) * (a.hop ?? 0.45) };
+  }
+
+  function frame(now) {
+    requestAnimationFrame(frame);
+    if (!W || !state) return;
+    const S = s();
+    ctx.clearRect(0, 0, W, W);
+    ctx.drawImage(staticCanvas, 0, 0);
+
+    const layout = tokenLayout(state);
+    const pulse = (Math.sin(now / 220) + 1) / 2;
+    const movable = new Set(moves.map(m => `${m.corner}:${m.from}`));
+
+    // Destination preview for the hovered move
+    if (hover) {
+      const path = movePath(hover);
+      ctx.save();
+      ctx.setLineDash([S * 0.12, S * 0.14]);
+      ctx.lineWidth = S * 0.08;
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = PALETTE[colours[hover.corner]].dark;
+      ctx.beginPath();
+      path.forEach(([y, x], i) => ctx[i ? 'lineTo' : 'moveTo'](x * S, y * S));
+      ctx.stroke();
+      ctx.restore();
+      const [ty, tx] = tokenPoint(hover.corner, hover.to, hover.token);
+      drawPawn(ctx, tx * S, ty * S, S * 0.36, PALETTE[colours[hover.corner]], { alpha: 0.45 });
+    }
+
+    const items = layout.map(t => {
+      const a = anims.get(`${t.corner}:${t.token}`);
+      const ap = a && animPoint(a, now);
+      if (a && !ap && now - a.t0 >= a.dur) anims.delete(`${t.corner}:${t.token}`);
+      if (a && now < a.t0) return { ...t, point: a.path[0], lift: 0, scale: 1 };
+      return ap ? { ...t, point: ap.point, lift: ap.lift * S, scale: 1, flying: true } : { ...t, lift: 0 };
+    });
+    items.sort((a, b) => (a.flying ? 1 : 0) - (b.flying ? 1 : 0) || a.point[0] - b.point[0]);
+
+    for (const t of items) {
+      const x = t.point[1] * S, y = t.point[0] * S, r = S * 0.36 * t.scale;
+      if (!t.flying && movable.has(`${t.corner}:${t.pos}`)) {
+        ctx.beginPath();
+        ctx.arc(x, y + r * 0.2, r * (1.05 + pulse * 0.2), 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255,255,255,${0.35 + pulse * 0.35})`;
+        ctx.fill();
+        ctx.lineWidth = S * 0.06;
+        ctx.strokeStyle = PALETTE[colours[t.corner]].dark;
+        ctx.stroke();
+      }
+      drawPawn(ctx, x, y, r, PALETTE[colours[t.corner]], { lift: t.lift });
+    }
+  }
+  requestAnimationFrame(frame);
+
+  return {
+    setColours(c) { colours = c; resize(); },
+    setState(st) { state = st; },
+    setMoves(ms) { moves = ms; if (hover && !ms.includes(hover)) hover = null; },
+    // Animate a move (already applied to the state) and any captures it made.
+    animate(move, captured = []) {
+      const path = movePath(move);
+      const now = performance.now();
+      const dur = STEP_MS * (path.length - 1) + (move.from < 0 ? 200 : 0);
+      anims.set(`${move.corner}:${move.token}`, { path, t0: now, dur, hop: move.from < 0 ? 1.2 : 0.45 });
+      let end = dur;
+      for (const c of captured) {
+        const from = tokenPoint(c.corner, c.from, c.token);
+        const to = YARD_SPOTS[c.corner][c.token];
+        anims.set(`${c.corner}:${c.token}`, { path: [from, to], t0: now + dur, dur: 520, hop: 2 });
+        end = dur + 520;
+      }
+      return new Promise(r => setTimeout(r, end + 30));
+    },
+  };
 }
